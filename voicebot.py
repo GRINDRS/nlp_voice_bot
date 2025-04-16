@@ -1,15 +1,54 @@
+import paho.mqtt.client as mqtt
 import speech_recognition as sr
 from gtts import gTTS
 import os
-import re
 import time
 import json
+import random
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=api_key)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+MQTT_BROKER = "localhost" 
+MQTT_PORT = 1883
+TOPIC_MOVEMENT = "movement"
+TOPIC_ARRIVED = "arrived"
+
+mqtt_client = mqtt.Client()
+
+EXHIBITS = [
+    {"keyword": "da vinci", "location": "Renaissance Art Hall"},
+    {"keyword": "van gogh", "location": "Impressionist Gallery"},
+    {"keyword": "dinosaur", "location": "Natural History Wing"},
+    {"keyword": "space", "location": "Cosmos Exploration Room"},
+    {"keyword": "egypt", "location": "Ancient Egypt Exhibit"},
+    {"keyword": "robot", "location": "Technology and Innovation Lab"},
+    {"keyword": "marine", "location": "Ocean Wonders Zone"},
+    {"keyword": "volcano", "location": "Earth Science Theatre"},
+    {"keyword": "medieval", "location": "Medieval Europe Hall"},
+    {"keyword": "fashion", "location": "Historic Fashion Gallery"},
+    {"keyword": "ai", "location": "Artificial Intelligence Hub"},
+    {"keyword": "greek", "location": "Ancient Greece Exhibit"},
+    {"keyword": "china", "location": "Dynasties of China Pavilion"},
+    {"keyword": "australia", "location": "First Nations Cultural Space"},
+    {"keyword": "insect", "location": "Entomology Showcase"},
+    {"keyword": "music", "location": "Sounds Through the Ages Room"},
+    {"keyword": "photography", "location": "Digital Media and Photography Wing"},
+    {"keyword": "cars", "location": "Automotive Innovations Hall"},
+    {"keyword": "planes", "location": "Aviation Heritage Gallery"},
+    {"keyword": "medicine", "location": "History of Medicine Chamber"},
+]
+
+def on_arrived(client, userdata, message):
+    print(" Arrived at exhibit!")
+    handle_conversation_after_arrival()
+
+mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+mqtt_client.subscribe(TOPIC_ARRIVED)
+mqtt_client.on_message = on_arrived
+mqtt_client.loop_start()
 
 def listen_to_user():
     recognizer = sr.Recognizer()
@@ -22,50 +61,73 @@ def listen_to_user():
 
     try:
         text = recognizer.recognize_google(audio)
-        print("🗣️ You said:", text)
+        print("You said:", text)
         return text
     except Exception as e:
         print("Error:", e)
         return None
 
-def get_bot_reply(user_text):
+def is_vague_input(user_text):
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
-        max_tokens=180,
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a friendly, efficient museum tour guide robot. "
-                    "When a visitor mentions an interest (e.g., Da Vinci), reply with a short, engaging 2-stop tour plan:\n"
-                    "- Greet them and acknowledge the interest\n"
-                    "- Mention two places you’ll take them, in order\n"
-                    "- Keep it under 3 sentences — punchy, helpful, natural\n"
-                    "- End with a movement command like:\n"
-                    "'ROBOT_CMD: MOVE_FORWARD:12; TURN_RIGHT:90'"
-                )
-            },
+            {"role": "system", "content": "Determine if the user input is vague (unspecific or unsure) or specific (mentions topics or interests). Reply ONLY with 'vague' or 'specific'."},
             {"role": "user", "content": user_text}
         ]
     )
-    return response.choices[0].message.content
+    return response.choices[0].message.content.strip().lower() == "vague"
 
-def extract_movement_code(text):
-    match = re.search(r'ROBOT_CMD:\s*(.*)', text)
-    if match:
-        return match.group(1).strip()
-    return "IDLE"
+def choose_exhibit_locations(user_text):
+    lower_text = user_text.lower()
+    matched_locations = []
+
+    for exhibit in EXHIBITS:
+        if exhibit["keyword"] in lower_text and exhibit["location"] not in matched_locations:
+            matched_locations.append(exhibit["location"])
+        if len(matched_locations) == 3:
+            break
+
+    if len(matched_locations) < 3:
+        remaining = [ex["location"] for ex in EXHIBITS if ex["location"] not in matched_locations]
+        matched_locations += random.sample(remaining, 3 - len(matched_locations))
+
+    return matched_locations
+
+def generate_gpt_reply(user_text, locations):
+    location_str = ", ".join(locations)
+    prompt = (
+        f"You are a friendly museum tour guide robot. A visitor has shown interest. "
+        f"Generate a warm, concise tour intro using these stops: {location_str}. "
+        "Keep it under 3 sentences. Do not include movement instructions."
+    )
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_text}
+        ]
+    )
+    return response.choices[0].message.content.strip()
 
 def speak_response(reply_text):
     tts = gTTS(reply_text)
     tts.save("response.mp3")
     os.system("afplay response.mp3 -r 1.3")
 
-def save_output_json(user_input, reply_text, movement_code):
+def send_movement_command(location):
+    print(f"Sending location to movement channel: {location}")
+    mqtt_client.publish(TOPIC_MOVEMENT, location)
+
+def handle_conversation_after_arrival():
+    response = "Here we are! This piece is truly fascinating. Would you like to hear more about it or continue the tour?"
+    print("Bot:", response)
+    speak_response(response)
+
+def save_output_json(user_input, reply_text, locations):
     output = {
         "input": user_input,
         "spoken_reply": reply_text,
-        "movement_code": movement_code,
+        "matched_locations": locations,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
     with open("output.json", "w") as f:
@@ -74,13 +136,16 @@ def save_output_json(user_input, reply_text, movement_code):
 
 user_input = listen_to_user()
 if user_input:
-    bot_reply = get_bot_reply(user_input)
-    print("Bot:", bot_reply)
+    vague = is_vague_input(user_input)
+    locations = choose_exhibit_locations(user_input) if not vague else random.sample([ex["location"] for ex in EXHIBITS], 3)
 
-    movement_code = extract_movement_code(bot_reply)
-    print(" Movement Code:", movement_code)
+    intro = "Hey! I’m your guide for today’s museum tour."
+    print("Bot:", intro)
+    speak_response(intro)
 
-    spoken_reply = bot_reply.split("ROBOT_CMD:")[0].strip()
-    speak_response(spoken_reply)
+    gpt_reply = generate_gpt_reply(user_input, locations)
+    print("Bot:", gpt_reply)
+    speak_response(gpt_reply)
 
-    save_output_json(user_input, spoken_reply, movement_code)
+    send_movement_command(locations[0])
+    save_output_json(user_input, gpt_reply, locations)
