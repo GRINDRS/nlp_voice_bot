@@ -1,10 +1,11 @@
 import paho.mqtt.client as mqtt
 import speech_recognition as sr
-import pyttsx3
 import os
 import time
 import json
 import random
+import subprocess
+from gtts import gTTS
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -17,9 +18,6 @@ TOPIC_MOVEMENT = "movement"
 TOPIC_ARRIVED = "arrived"
 
 mqtt_client = mqtt.Client(protocol=mqtt.MQTTv311)
-
-engine = pyttsx3.init()
-engine.setProperty('rate', 180)
 
 EXHIBITS = [
     {"keyword": "da vinci", "location": "Renaissance Art Hall"},
@@ -47,6 +45,15 @@ EXHIBITS = [
 current_location = None
 upcoming_locations = []
 
+def speak(text):
+    print("Bot:", text)
+    tts = gTTS(text=text, lang='en')
+    tts.save("output.mp3")
+    subprocess.run([
+        "ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
+        "-af", "atempo=1.3", "output.mp3"
+    ], check=True)
+
 def on_arrived(client, userdata, message):
     global current_location, upcoming_locations
     print(f"\nArrived at: {current_location}")
@@ -59,11 +66,6 @@ mqtt_client.subscribe(TOPIC_ARRIVED)
 mqtt_client.on_message = on_arrived
 mqtt_client.loop_start()
 
-def speak(text):
-    print("Bot:", text)
-    engine.say(text)
-    engine.runAndWait()
-
 def listen_to_user():
     recognizer = sr.Recognizer()
     print("Press [Enter] to start speaking")
@@ -75,6 +77,10 @@ def listen_to_user():
             audio = recognizer.listen(source, timeout=6, phrase_time_limit=20)
             text = recognizer.recognize_google(audio)
             print("You said:", text)
+
+            if text.strip().lower() == "testing cancel":
+                os._exit(0)
+
             return text
         except Exception as e:
             print("Error:", e)
