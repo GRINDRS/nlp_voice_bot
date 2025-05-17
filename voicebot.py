@@ -31,22 +31,17 @@ EXHIBITS = [
 current_location = None
 upcoming_locations = []
 
-def on_arrived(client, userdata, message):
-    global current_location, upcoming_locations
-    print(f"\nArrived at: {current_location}")
-    if upcoming_locations:
-        print(f"Next: {upcoming_locations[0]}")
-    handle_conversation_after_arrival()
-
-mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-mqtt_client.subscribe(TOPIC_ARRIVED)
-mqtt_client.on_message = on_arrived
-mqtt_client.loop_start()
-
 def speak(text):
     print("Bot:", text)
-    engine.say(text)
-    engine.runAndWait()
+    try:
+        tts = gTTS(text=text, lang='en')
+        tts.save("output.mp3")
+        subprocess.run([
+            "ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
+            "-af", "atempo=1.3", "output.mp3"
+        ], check=True)
+    except Exception as e:
+        print(f"Audio error (continuing with text only): {e}")
 
 def listen_to_user():
     recognizer = sr.Recognizer()
@@ -61,7 +56,6 @@ def listen_to_user():
         except Exception as e:
             print("Error:", e)
             return None
-
 
 YES_WORDS  = {"yes", "sure", "okay", "sounds good", "yep", "yeah", "alright", "why not"}
 NO_WORDS   = {"no", "nope", "another", "different", "change", "don't"}
@@ -87,20 +81,16 @@ def wants_move_on(text: str | None) -> bool:
 def wants_to_end(text: str | None) -> bool:
     return bool(text) and _contains(text, END_WORDS)
 
-
 def send_movement_command(location: str) -> None:
     print(f"Sending location to movement channel: {location}")
     mqtt_client.publish(TOPIC_MOVEMENT, location)
-
 
 def simulate_arrival() -> None:         
     time.sleep(2)
     on_arrived(None, None, type("MQTTMessage", (object,), {"topic": TOPIC_ARRIVED, "payload": b""}))
 
-
 def on_arrived(client, userdata, message):
     print(f"\nArrived at: {current_location}")
-
 
 def exhibit_summary(name: str) -> str:
     return client.chat.completions.create(
@@ -108,7 +98,6 @@ def exhibit_summary(name: str) -> str:
         messages=[{"role": "system",
                    "content": f"You are a museum guide. Provide a warm, engaging 2-3 sentence summary about the exhibit '{name}'."}]
     ).choices[0].message.content.strip()
-
 
 def answer_question(exhibit: str, question: str) -> str:
     return client.chat.completions.create(
@@ -118,7 +107,6 @@ def answer_question(exhibit: str, question: str) -> str:
             {"role": "user", "content": question}
         ]
     ).choices[0].message.content.strip()
-
 
 def propose_exhibit(unvisited: list[str]) -> str | None:
     if not unvisited:
@@ -137,19 +125,18 @@ def propose_exhibit(unvisited: list[str]) -> str | None:
             speak("No problem, let me suggest another option.")
     return None
 
-
 def end_tour() -> None:
     speak("Thanks for visiting! I hope you enjoy the rest of your day at the museum.")
     send_movement_command("initial")
     raise SystemExit
 
-
+# MQTT setup
 mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
 mqtt_client.subscribe(TOPIC_ARRIVED)
 mqtt_client.on_message = on_arrived
 mqtt_client.loop_start()
 
-
+# Start interaction
 visited: set[str] = set()
 speak("Hi! Welcome to the museum. What kind of exhibits are you interested in seeing today?")
 first = listen_to_user()
@@ -167,23 +154,18 @@ if not first or _contains(first, {"don't know", "not sure", "idk"}):
         simulate_arrival()
         speak(exhibit_summary(current_location))
 
-        
         while True:
             speak("Do you have any questions about this exhibit, or would you like to move on?")
             resp = listen_to_user()
 
             if wants_to_end(resp):
                 end_tour()
-
             if wants_move_on(resp):
                 break
-
             if not resp:
                 speak("I didn't catch that, so let's move on.")
                 break
-
             speak(answer_question(current_location, resp))
-
 else:
     def choose_locs(text: str) -> list[str]:
         exhibit_list = ", ".join(f"{e['keyword']} ({e['location']})" for e in EXHIBITS)
@@ -214,14 +196,11 @@ else:
 
             if wants_to_end(r):
                 end_tour()
-
             if wants_move_on(r):
                 break
-
             if not r:
                 speak("I didn't catch that, so let's move on.")
                 break
-
             speak(answer_question(current_location, r))
 
         if not upcoming:
