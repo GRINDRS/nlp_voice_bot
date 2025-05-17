@@ -1,6 +1,6 @@
-paho-mqtt
-SpeechRecognition
-pyttsx3
-openai
-python-dotenv
-pyaudio
+paho-mqtt==1.6.1
+openai==1.3.0
+python-dotenv==1.0.0
+SpeechRecognition==3.10.0
+gTTS==2.3.2
+pyaudio==0.2.13
