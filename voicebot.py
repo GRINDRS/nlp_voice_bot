@@ -8,7 +8,6 @@ from gtts import gTTS
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# ───────────────────────  setup  ───────────────────────
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -68,9 +67,9 @@ YES_WORDS  = {"yes", "sure", "okay", "sounds good", "yep", "yeah", "alright", "w
 NO_WORDS   = {"no", "nope", "another", "different", "change", "don't"}
 MOVE_WORDS = {
     "move on", "next", "continue", "let's go", "go on",
-    "no questions", "no question"     # NEW → treat as move-on
+    "no questions", "no question"     
 }
-END_WORDS  = {"done", "stop", "that's all", "end", "quit", "exit"}  # plain 'no' removed
+END_WORDS  = {"done", "stop", "that's all", "end", "quit", "exit"}  
 
 def _contains(text: str, word_set: set[str]) -> bool:
     t = text.lower()
@@ -94,7 +93,7 @@ def send_movement_command(location: str) -> None:
     mqtt_client.publish(TOPIC_MOVEMENT, location)
 
 
-def simulate_arrival() -> None:          # demo-only helper
+def simulate_arrival() -> None:         
     time.sleep(2)
     on_arrived(None, None, type("MQTTMessage", (object,), {"topic": TOPIC_ARRIVED, "payload": b""}))
 
@@ -132,8 +131,7 @@ def propose_exhibit(unvisited: list[str]) -> str | None:
         if wants_to_end(reply):
             return None
         if wants_yes(reply):
-            return choice        # user accepted
-        # otherwise suggest another
+            return choice        
         unvisited.remove(choice)
         if unvisited:
             speak("No problem, let me suggest another option.")
@@ -146,19 +144,16 @@ def end_tour() -> None:
     raise SystemExit
 
 
-# ───────────────────────  MQTT  ───────────────────────
 mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
 mqtt_client.subscribe(TOPIC_ARRIVED)
 mqtt_client.on_message = on_arrived
 mqtt_client.loop_start()
 
 
-# ───────────────────────  MAIN  ───────────────────────
 visited: set[str] = set()
 speak("Hi! Welcome to the museum. What kind of exhibits are you interested in seeing today?")
 first = listen_to_user()
 
-# UNSURE first reply?
 if not first or _contains(first, {"don't know", "not sure", "idk"}):
     while True:
         unvisited = [e["location"] for e in EXHIBITS if e["location"] not in visited]
@@ -172,7 +167,7 @@ if not first or _contains(first, {"don't know", "not sure", "idk"}):
         simulate_arrival()
         speak(exhibit_summary(current_location))
 
-        # Q&A loop
+        
         while True:
             speak("Do you have any questions about this exhibit, or would you like to move on?")
             resp = listen_to_user()
@@ -189,7 +184,6 @@ if not first or _contains(first, {"don't know", "not sure", "idk"}):
 
             speak(answer_question(current_location, resp))
 
-# SPECIFIC / GENRE path
 else:
     def choose_locs(text: str) -> list[str]:
         exhibit_list = ", ".join(f"{e['keyword']} ({e['location']})" for e in EXHIBITS)
@@ -214,7 +208,6 @@ else:
         simulate_arrival()
         speak(exhibit_summary(current_location))
 
-        # Q&A loop for this exhibit
         while True:
             speak("Do you have any questions about this exhibit, or would you like to move on?")
             r = listen_to_user()
@@ -231,12 +224,11 @@ else:
 
             speak(answer_question(current_location, r))
 
-        # pick what’s next
         if not upcoming:
             speak("Would you like to visit another exhibit?")
             nxt = listen_to_user()
 
-            if wants_to_end(nxt) or wants_no(nxt):   # plain 'no' ends here
+            if wants_to_end(nxt) or wants_no(nxt):  
                 end_tour()
 
             if not nxt or _contains(nxt, {"don't know", "not sure", "idk"}):
