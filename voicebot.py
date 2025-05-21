@@ -3,6 +3,7 @@ import speech_recognition as sr
 import os
 import time
 import random
+import json
 import subprocess
 from gtts import gTTS
 from openai import OpenAI
@@ -32,8 +33,20 @@ current_location = None
 upcoming_locations = []
 visited: set[str] = set()
 
+def load_json(filename):
+    with open(filename, "r") as file:
+        return json.load(file)
+    
+def update_json(key, new_value):
+    data = load_json("spoke.json")
+    data[key] = new_value
+    with open("spoke.json", "w") as file:
+        json.dump(data, file, indent=4)
+
+
 def speak(text):
     print("Bot:", text)
+    update_json("response", text)
     try:
         tts = gTTS(text=text, lang='en')
         tts.save("output.mp3")
@@ -52,17 +65,19 @@ def listen_to_user():
         try:
             audio = recognizer.listen(source, timeout=6, phrase_time_limit=20)
             text = recognizer.recognize_google(audio)
+            update_json("user", text)
             print("You said:", text)
+            
             return text
         except Exception as e:
             print("Error:", e)
             return None
 
-YES_WORDS  = {"yes", "sure", "okay", "sounds good", "yep", "yeah", "alright", "why not"}
+YES_WORDS  = {"yes", "sure", "okay", "sounds good", "yep", "yeah", "alright", "why not", "okay"}
 NO_WORDS   = {"no", "nope", "another", "different", "change", "don't"}
 MOVE_WORDS = {
     "move on", "next", "continue", "let's go", "go on",
-    "no questions", "no question"     
+    "no questions", "no question" , "okay", "ok"    
 }
 END_WORDS  = {"done", "stop", "that's all", "end", "quit", "exit"}  
 
@@ -241,8 +256,11 @@ if tour_type is None or _contains(tour_type, {"guided tour", "shown", "guide", "
               Let's start with the popular one, if you decide to you want to see an exhibit, just ask.""")
         upcoming = pop_locations
     while True:
+        update_json("going_to", upcoming)
         current_location = upcoming.pop(0)
+        update_json("current", current_location)
         visited.add(current_location)
+        update_json("been_to", visited)
         send_movement_command(current_location)
         simulate_arrival()
         speak(exhibit_summary(current_location))
@@ -294,9 +312,13 @@ else:
         ##functionality for choosing painting here
         [current_location, message] = find_painting(ans)
         speak(message)
+        update_json("going_to", [current_location])
         visited.add(current_location)
+        update_json("been_to", visited)
         send_movement_command(current_location)
         simulate_arrival()
+        update_json("current", current_location)
+        update_json("going_to", [])
         speak(exhibit_summary(current_location))
         while True:
             speak("Do you have any questions about this exhibit, or would you like to move on?")
