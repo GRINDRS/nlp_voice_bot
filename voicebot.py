@@ -28,28 +28,50 @@ EXHIBITS = [
     {"keyword": "egyptian",     "location": "Ancient Egyptian Statue"},
     {"keyword": "plushy dog",   "location": "Plushy Dog Sculpture"},
 ]
+
 pop_locations = ["The Scream by Edvard Munch", "Mona Lisa by Leonardo da Vinci", "Starry Night by Vincent van Gogh"]
 current_location = None
 upcoming_locations = []
 visited: set[str] = set()
 
 def load_json(filename):
+    """Load JSON data from a file.
+    Args:
+        filename (str): The name of the JSON file to load.
+    Returns:
+        dict: The loaded JSON data.
+    """
     with open(filename, "r") as file:
         return json.load(file)
     
 def update_json(key, new_value):
+    """Update a specific key in the JSON file with a new value.
+    Args:
+        key (str): The key to update in the JSON file.
+        new_value: The new value to set for the specified key.
+    """
+    # Load the existing JSON data
     data = load_json("spoke.json")
     data[key] = new_value
+    # Write the updated data back to the JSON file
     with open("spoke.json", "w") as file:
         json.dump(data, file, indent=4)
 
 
 def speak(text):
+    """Convert text to speech and play it.
+    Args:
+        text (str): The text to convert to speech.
+    """
+    ##Print to terminal
     print("Bot:", text)
+    ##Update JSON for the web app
     update_json("response", text)
     try:
         tts = gTTS(text=text, lang='en')
+        # Save the audio to a file
         tts.save("output.mp3")
+        # Play the audio file using ffplay
         subprocess.run([
             "ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
             "-af", "atempo=1.3", "output.mp3"
@@ -58,21 +80,32 @@ def speak(text):
         print(f"Audio error (continuing with text only): {e}")
 
 def listen_to_user():
+    """Listen for user input and convert it to text.
+    Returns:
+        str: The recognized text from the user's speech.
+    """
+    # Initialize the recognizer
     recognizer = sr.Recognizer()
     with sr.Microphone() as source:
+        #Adjust for ambient noise
         recognizer.adjust_for_ambient_noise(source, duration=0.4)
-        print("Listening ...")
+        print("Listening ...") 
         try:
-            audio = recognizer.listen(source, timeout=6, phrase_time_limit=20)
-            text = recognizer.recognize_google(audio)
+            # Listen for audio input
+            audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+            # Convert to text
+            text = recognizer.recognize_google(audio, language="en-US")
+            print(text)
+            # Update JSON for the web app
             update_json("user", text)
             print("You said:", text)
-            
             return text
         except Exception as e:
             print("Error:", e)
             return None
 
+# Define keywords for user responses
+# These keywords are used to determine the user's intent
 YES_WORDS  = {"yes", "sure", "okay", "sounds good", "yep", "yeah", "alright", "why not", "okay"}
 NO_WORDS   = {"no", "nope", "another", "different", "change", "don't"}
 MOVE_WORDS = {
@@ -81,29 +114,100 @@ MOVE_WORDS = {
 }
 END_WORDS  = {"done", "stop", "that's all", "end", "quit", "exit"}  
 
+
 def _contains(text: str, word_set: set[str]) -> bool:
-    t = text.lower()
-    return any(w in t for w in word_set)
+    """
+    Check if any word in the given set appears in the text.
+
+    Args:
+        text (str): The input text to search within.
+        word_set (set[str]): A set of words to check for presence in the text.
+
+    Returns:
+        bool: True if any word in the set is found in the text; False otherwise.
+    """
+    t = text.lower()  # Convert text to lowercase for case-insensitive matching
+    return any(w in t for w in word_set)  # Check if any word in word_set is found in text
+
 
 def wants_yes(text: str | None) -> bool:
+    """
+    Determine if the text expresses affirmative intent.
+
+    Args:
+        text (str | None): Input text to evaluate.
+
+    Returns:
+        bool: True if the text contains words indicating 'yes'; False otherwise.
+    """
     return bool(text) and _contains(text, YES_WORDS)
 
+
 def wants_no(text: str | None) -> bool:
+    """
+    Determine if the text expresses negative intent.
+
+    Args:
+        text (str | None): Input text to evaluate.
+
+    Returns:
+        bool: True if the text contains words indicating 'no'; False otherwise.
+    """
     return bool(text) and _contains(text, NO_WORDS)
 
+
 def wants_move_on(text: str | None) -> bool:
+    """
+    Determine if the text expresses intent to move on.
+
+    Args:
+        text (str | None): Input text to evaluate.
+
+    Returns:
+        bool: True if the text contains words indicating movement or affirmative intent; False otherwise.
+    """
     return bool(text) and (_contains(text, MOVE_WORDS) or wants_yes(text))
 
+
 def wants_to_end(text: str | None) -> bool:
+    """
+    Determine if the text expresses intent to end a process.
+
+    Args:
+        text (str | None): Input text to evaluate.
+
+    Returns:
+        bool: True if the text contains words indicating an end action; False otherwise.
+    """
     return bool(text) and _contains(text, END_WORDS)
 
-def send_movement_command(location: str) -> None:
-    print(f"Sending location to movement channel: {location}")
-    mqtt_client.publish(TOPIC_MOVEMENT, location)
 
-def simulate_arrival() -> None:         
-    time.sleep(2)
-    on_arrived(None, None, type("MQTTMessage", (object,), {"topic": TOPIC_ARRIVED, "payload": b""}))
+def send_movement_command(location: str) -> None:
+    """
+    Send a movement command by publishing the location to a designated MQTT channel.
+
+    Args:
+        location (str): The location data to be sent.
+
+    Returns:
+        None
+    """
+    print(f"Sending location to movement channel: {location}")  # Debugging output
+    mqtt_client.publish(TOPIC_MOVEMENT, location)  # Send location data over MQTT
+
+
+def simulate_arrival() -> None:
+    """
+    Simulate an arrival event by triggering the 'on_arrived' function.
+
+    The function waits for 2 seconds before simulating the arrival event.
+
+    Returns:
+        None
+    """
+    time.sleep(2)  # Simulate a delay before arrival
+    on_arrived(None, None, type("MQTTMessage", (object,), {"topic": TOPIC_ARRIVED, "payload": b""}))  # Simulate an MQTT arrival message
+
 
 def on_arrived(client, userdata, message):
     print(f"\nArrived at: {current_location}")
